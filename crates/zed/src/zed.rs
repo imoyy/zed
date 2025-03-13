@@ -436,7 +436,7 @@ fn initialize_panels(
             workspace.add_panel(git_panel, window, cx);
         })?;
 
-        let is_assistant2_enabled = true; // 强制启用 assistant2
+        let is_assistant2_enabled = true; // 强制启用 assistant2!
 
         let (assistant_panel, assistant2_panel) = if is_assistant2_enabled {
             log::info!("[assistant2-debug] initializing Assistant2");
