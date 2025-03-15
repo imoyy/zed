@@ -390,6 +390,7 @@ impl EditorElement {
         register_action(editor, window, Editor::set_mark);
         register_action(editor, window, Editor::swap_selection_ends);
         register_action(editor, window, Editor::show_completions);
+        register_action(editor, window, Editor::show_word_completions);
         register_action(editor, window, Editor::toggle_code_actions);
         register_action(editor, window, Editor::open_excerpts);
         register_action(editor, window, Editor::open_excerpts_in_split);
@@ -4375,7 +4376,9 @@ impl EditorElement {
                     }),
                 };
 
-                if let Some((hunk_bounds, background_color, corner_radii, _)) = hunk_to_paint {
+                if let Some((hunk_bounds, background_color, corner_radii, status)) = hunk_to_paint {
+                    let unstaged = status.has_secondary_hunk();
+
                     // Flatten the background color with the editor color to prevent
                     // elements below transparent hunks from showing through
                     let flattened_background_color = cx
@@ -4384,13 +4387,29 @@ impl EditorElement {
                         .editor_background
                         .blend(background_color);
 
-                    window.paint_quad(quad(
-                        hunk_bounds,
-                        corner_radii,
-                        flattened_background_color,
-                        Edges::default(),
-                        transparent_black(),
-                    ));
+                    if unstaged {
+                        window.paint_quad(quad(
+                            hunk_bounds,
+                            corner_radii,
+                            flattened_background_color,
+                            Edges::default(),
+                            transparent_black(),
+                        ));
+                    } else {
+                        let flattened_unstaged_background_color = cx
+                            .theme()
+                            .colors()
+                            .editor_background
+                            .blend(background_color.opacity(0.3));
+
+                        window.paint_quad(quad(
+                            hunk_bounds,
+                            corner_radii,
+                            flattened_unstaged_background_color,
+                            Edges::all(Pixels(1.0)),
+                            flattened_background_color,
+                        ));
+                    }
                 }
             }
         });
