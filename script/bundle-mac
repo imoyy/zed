@@ -91,10 +91,10 @@ if [ "$local_arch" = true ]; then
     cargo build ${build_flag} --package zed --package cli --package remote_server
 else
     echo "Compiling zed binaries"
-    cargo build ${build_flag} --package zed --package cli --target aarch64-apple-darwin --target x86_64-apple-darwin
+    cargo build ${build_flag} --package zed --package cli --target x86_64-apple-darwin
     # Build remote_server in separate invocation to prevent feature unification from other crates
     # from influencing dynamic libraries required by it.
-    cargo build ${build_flag} --package remote_server     --target aarch64-apple-darwin --target x86_64-apple-darwin
+    cargo build ${build_flag} --package remote_server     --target x86_64-apple-darwin
 fi
 
 echo "Creating application bundle"
@@ -109,7 +109,6 @@ if [ "$local_arch" = true ]; then
     app_path=$(cargo bundle ${build_flag} --select-workspace-root | xargs)
 else
     app_path_x64=$(cargo bundle ${build_flag} --target x86_64-apple-darwin --select-workspace-root | xargs)
-    app_path_aarch64=$(cargo bundle ${build_flag} --target aarch64-apple-darwin --select-workspace-root | xargs)
     app_path=$app_path_x64
 fi
 
@@ -168,9 +167,6 @@ function download_git() {
     pushd "$tmp_dir"
 
     case "$architecture" in
-        aarch64-apple-darwin)
-            download_and_unpack "https://github.com/desktop/dugite-native/releases/download/${GIT_VERSION}/dugite-native-${GIT_VERSION}-${GIT_VERSION_SHA}-macOS-arm64.tar.gz" bin/git ./git
-            ;;
         x86_64-apple-darwin)
             download_and_unpack "https://github.com/desktop/dugite-native/releases/download/${GIT_VERSION}/dugite-native-${GIT_VERSION}-${GIT_VERSION_SHA}-macOS-x64.tar.gz" bin/git ./git
             ;;
@@ -204,14 +200,14 @@ function prepare_binaries() {
     echo "Removing existing gzipped dSYMs for $architecture"
     rm -f target/${architecture}/${target_dir}/Zed.dwarf.gz
 
-    echo "Gzipping dSYMs for $architecture"
+    # echo "Gzipping dSYMs for $architecture"
     gzip -f target/${architecture}/${target_dir}/Zed.dwarf
 
-    echo "Uploading dSYMs for $architecture"
-    upload_to_blob_store_public \
-        "zed-debug-symbols" \
-        target/${architecture}/${target_dir}/Zed.dwarf.gz \
-        "$channel/Zed-$version-${architecture}.dwarf.gz"
+    # echo "Uploading dSYMs for $architecture"
+    # upload_to_blob_store_public \
+    #     "zed-debug-symbols" \
+    #     target/${architecture}/${target_dir}/Zed.dwarf.gz \
+    #     "$channel/Zed-$version-${architecture}.dwarf.gz"
 
     cp target/${architecture}/${target_dir}/zed "${app_path}/Contents/MacOS/zed"
     cp target/${architecture}/${target_dir}/cli "${app_path}/Contents/MacOS/cli"
@@ -357,15 +353,11 @@ if [ "$local_arch" = true ]; then
     sign_binary "target/release/remote_server"
 else
     # Create universal binary
-    prepare_binaries "aarch64-apple-darwin" "$app_path_aarch64"
     prepare_binaries "x86_64-apple-darwin" "$app_path_x64"
 
 
     sign_app_binaries "$app_path_x64" "x86_64-apple-darwin" "x86_64-apple-darwin"
-    sign_app_binaries "$app_path_aarch64" "aarch64-apple-darwin" "aarch64-apple-darwin"
 
     sign_binary "target/x86_64-apple-darwin/release/remote_server"
-    sign_binary "target/aarch64-apple-darwin/release/remote_server"
     gzip -f --stdout --best target/x86_64-apple-darwin/release/remote_server > target/zed-remote-server-macos-x86_64.gz
-    gzip -f --stdout --best target/aarch64-apple-darwin/release/remote_server > target/zed-remote-server-macos-aarch64.gz
 fi
