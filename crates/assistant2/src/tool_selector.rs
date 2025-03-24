@@ -1,17 +1,39 @@
 use std::sync::Arc;
 
+use assistant_settings::{AgentProfile, AssistantSettings};
 use assistant_tool::{ToolSource, ToolWorkingSet};
-use gpui::Entity;
+use gpui::{Entity, Subscription};
+use indexmap::IndexMap;
 use scripting_tool::ScriptingTool;
-use ui::{prelude::*, ContextMenu, IconButtonShape, PopoverMenu, Tooltip};
+use settings::{Settings as _, SettingsStore};
+use ui::{prelude::*, ContextMenu, PopoverMenu, Tooltip};
 
 pub struct ToolSelector {
+    profiles: IndexMap<Arc<str>, AgentProfile>,
     tools: Arc<ToolWorkingSet>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl ToolSelector {
-    pub fn new(tools: Arc<ToolWorkingSet>, _cx: &mut Context<Self>) -> Self {
-        Self { tools }
+    pub fn new(tools: Arc<ToolWorkingSet>, cx: &mut Context<Self>) -> Self {
+        let settings_subscription = cx.observe_global::<SettingsStore>(move |this, cx| {
+            this.refresh_profiles(cx);
+        });
+
+        let mut this = Self {
+            profiles: IndexMap::default(),
+            tools,
+            _subscriptions: vec![settings_subscription],
+        };
+        this.refresh_profiles(cx);
+
+        this
+    }
+
+    fn refresh_profiles(&mut self, cx: &mut Context<Self>) {
+        let settings = AssistantSettings::get_global(cx);
+
+        self.profiles = settings.profiles.clone();
     }
 
     fn build_context_menu(
@@ -19,27 +41,49 @@ impl ToolSelector {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ContextMenu> {
-        ContextMenu::build(window, cx, |mut menu, _window, cx| {
+        let profiles = self.profiles.clone();
+        let tool_set = self.tools.clone();
+        ContextMenu::build_persistent(window, cx, move |mut menu, _window, cx| {
             let icon_position = IconPosition::End;
-            let tools_by_source = self.tools.tools_by_source(cx);
 
-            let all_tools_enabled = self.tools.are_all_tools_enabled();
-            menu = menu.header("Tools").toggleable_entry(
-                "All Tools",
-                all_tools_enabled,
-                icon_position,
-                None,
-                {
-                    let tools = self.tools.clone();
+            menu = menu.header("Profiles");
+            for (_id, profile) in profiles.clone() {
+                menu = menu.toggleable_entry(profile.name.clone(), false, icon_position, None, {
+                    let tools = tool_set.clone();
                     move |_window, cx| {
-                        if all_tools_enabled {
-                            tools.disable_all_tools(cx);
-                        } else {
-                            tools.enable_all_tools();
+                        tools.disable_source(ToolSource::Native, cx);
+                        tools.disable_scripting_tool();
+                        tools.enable(
+                            ToolSource::Native,
+                            &profile
+                                .tools
+                                .iter()
+                                .filter_map(|(tool, enabled)| enabled.then(|| tool.clone()))
+                                .collect::<Vec<_>>(),
+                        );
+
+                        if profile.tools.contains_key(ScriptingTool::NAME) {
+                            tools.enable_scripting_tool();
                         }
                     }
-                },
-            );
+                });
+            }
+
+            menu = menu.separator();
+
+            let tools_by_source = tool_set.tools_by_source(cx);
+
+            let all_tools_enabled = tool_set.are_all_tools_enabled();
+            menu = menu.toggleable_entry("All Tools", all_tools_enabled, icon_position, None, {
+                let tools = tool_set.clone();
+                move |_window, cx| {
+                    if all_tools_enabled {
+                        tools.disable_all_tools(cx);
+                    } else {
+                        tools.enable_all_tools();
+                    }
+                }
+            });
 
             for (source, tools) in tools_by_source {
                 let mut tools = tools
@@ -47,7 +91,7 @@ impl ToolSelector {
                     .map(|tool| {
                         let source = tool.source();
                         let name = tool.name().into();
-                        let is_enabled = self.tools.is_enabled(&source, &name);
+                        let is_enabled = tool_set.is_enabled(&source, &name);
 
                         (source, name, is_enabled)
                     })
@@ -57,16 +101,16 @@ impl ToolSelector {
                     tools.push((
                         ToolSource::Native,
                         ScriptingTool::NAME.into(),
-                        self.tools.is_scripting_tool_enabled(),
+                        tool_set.is_scripting_tool_enabled(),
                     ));
                     tools.sort_by(|(_, name_a, _), (_, name_b, _)| name_a.cmp(name_b));
                 }
 
                 menu = match &source {
-                    ToolSource::Native => menu.header("Zed"),
+                    ToolSource::Native => menu.separator().header("Zed Tools"),
                     ToolSource::ContextServer { id } => {
                         let all_tools_from_source_enabled =
-                            self.tools.are_all_tools_from_source_enabled(&source);
+                            tool_set.are_all_tools_from_source_enabled(&source);
 
                         menu.separator().header(id).toggleable_entry(
                             "All Tools",
@@ -74,7 +118,7 @@ impl ToolSelector {
                             icon_position,
                             None,
                             {
-                                let tools = self.tools.clone();
+                                let tools = tool_set.clone();
                                 let source = source.clone();
                                 move |_window, cx| {
                                     if all_tools_from_source_enabled {
@@ -90,7 +134,7 @@ impl ToolSelector {
 
                 for (source, name, is_enabled) in tools {
                     menu = menu.toggleable_entry(name.clone(), is_enabled, icon_position, None, {
-                        let tools = self.tools.clone();
+                        let tools = tool_set.clone();
                         move |_window, _cx| {
                             if name.as_ref() == ScriptingTool::NAME {
                                 if is_enabled {
@@ -124,7 +168,6 @@ impl Render for ToolSelector {
             })
             .trigger_with_tooltip(
                 IconButton::new("tool-selector-button", IconName::SettingsAlt)
-                    .shape(IconButtonShape::Square)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted),
                 Tooltip::text("Customize Tools"),
