@@ -1,0 +1,62 @@
+name: Scheduled Stable Build
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  check_stable_releases:
+    name: Check for new stable release
+    runs-on: ubuntu-latest
+    outputs:
+      build_ref: ${{ steps.check.outputs.build_ref }}
+      release_tag: ${{ steps.check.outputs.release_tag }}
+      release_body: ${{ steps.check.outputs.release_body }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Check releases
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get latest commit SHA
+          LATEST_SHA=$(git rev-parse HEAD)
+          echo "Latest commit SHA: $LATEST_SHA"
+
+          # Get latest stable release tag from current repo
+          CURRENT_TAG=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name // "none"')
+          echo "Latest current repo release: $CURRENT_TAG"
+
+          # Generate new version tag based on timestamp
+          NEW_TAG="v$(date +'%Y%m%d.%H%M%S')"
+          echo "New release tag: $NEW_TAG"
+
+          # Always build from latest commit
+          echo "build_ref=$LATEST_SHA" >> $GITHUB_OUTPUT
+          echo "release_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "should_build=true" >> $GITHUB_OUTPUT
+
+          # Generate release body
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          echo "Stable build from commit $LATEST_SHA" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  trigger_build:
+    name: Build
+    needs: check_stable_releases
+    if: ${{ needs.check_stable_releases.outputs.should_build == 'true' }}
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.check_stable_releases.outputs.build_ref }}
+
+  trigger_release:
+    name: Release
+    needs: [check_stable_releases, trigger_build]
+    uses: ./.github/workflows/release.yml
+    with:
+      is_prerelease: false
+      release_tag: ${{ needs.check_stable_releases.outputs.release_tag }}
+      release_body: ${{ needs.check_stable_releases.outputs.release_body }}
+    permissions:
+      contents: write
