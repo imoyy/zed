@@ -14,6 +14,11 @@ jobs:
       release_tag: ${{ steps.check.outputs.release_tag }}
       release_body: ${{ steps.check.outputs.release_body }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Check releases
         id: check
         env:
